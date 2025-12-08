@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables
+# .env
+
+# Generated charts
+# *.png
+
+# VS Code
+.vscode/
+
+# Virtual Environments
+venv/
+env/

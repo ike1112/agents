@@ -1,0 +1,7 @@
+pandas
+matplotlib
+Pillow
+python-dotenv
+
+ipython
+google-genai
