@@ -2,6 +2,24 @@
 
 This SQL agent demonstrates an **agentic workflow** that uses the "Reflection with External Feedback" pattern to iteratively improve SQL queries.
 
+## Quick Start
+
+1. **Install Dependencies**
+   ```bash
+   pip install google-genai pandas python-dotenv ipython
+   ```
+
+2. **Set up API Key**
+   Create a `.env` file and add your Google Gemini API key:
+   ```env
+   GOOGLE_API_KEY=your_api_key_here
+   ```
+
+3. **Run the Agent**
+   ```bash
+   python sql_agent.py
+   ```
+
 ## Design Overview
 
 ### The Problem
