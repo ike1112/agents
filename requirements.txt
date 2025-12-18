@@ -9,3 +9,9 @@ tabulate
 
 requests
 qrcode[pil]
+
+fastapi
+uvicorn
+sqlalchemy
+jinja2
+markdown
