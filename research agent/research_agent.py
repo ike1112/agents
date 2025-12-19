@@ -149,61 +149,68 @@ def generate_research_report_with_tools(prompt: str, model: str = "gemini-2.0-fl
     return final_text if final_text else "No final report generated."
 
 
-def reflection_and_rewrite(report, model: str = "gemini-2.0-flash-exp", temperature: float = 0.3) -> dict:
+def critique_report(report, model: str = "gemini-2.0-flash-exp", temperature: float = 0.3) -> str:
     """
-    Generates a structured reflection AND a revised research report.
-    Accepts raw text.
+    Generates a critique of the research report.
     """
-    
     report_text = research_tools.parse_input(report)
 
-    system_prompt = "You are an academic reviewer and editor."
+    system_prompt = "You are an academic reviewer."
     
     user_prompt = f"""
-    Review the following research report and provide:
-    1. A reflection on its strengths, limitations, suggestions for improvement, and opportunities.
-    2. A revised version of the report that incorporates these improvements.
+    Review the following research report and provide a detailed critique.
+    Focus on:
+    1. Strengths: What is good?
+    2. Limitations: What is missing or weak?
+    3. Suggestions: Specific actionable advice for improvement.
+    4. Opportunities: Areas for further expansion.
 
     Report to review:
     {report_text}
     """
 
-    # We want JSON output
-    config = types.GenerateContentConfig(
-        temperature=temperature,
-        system_instruction=system_prompt,
-        response_mime_type="application/json",
-        response_schema={
-            "type": "OBJECT",
-            "properties": {
-                "reflection": {"type": "STRING"},
-                "revised_report": {"type": "STRING"}
-            },
-            "required": ["reflection", "revised_report"]
-        }
+    response = client.models.generate_content(
+        model=model,
+        contents=user_prompt,
+        config=types.GenerateContentConfig(
+            temperature=temperature,
+            system_instruction=system_prompt
+        )
     )
+    
+    return response.text.strip()
+
+
+def rewrite_report(report, critique, model: str = "gemini-2.0-flash-exp", temperature: float = 0.3) -> str:
+    """
+    Rewrites the research report based on the provided critique.
+    """
+    report_text = research_tools.parse_input(report)
+    
+    system_prompt = "You are an academic editor. Improve the report based on the critique."
+    
+    user_prompt = f"""
+    Rewrite the following research report to incorporate the reviewer's critique.
+    
+    Original Report:
+    {report_text}
+    
+    Reviewer's Critique:
+    {critique}
+    
+    Return ONLY the revised report text.
+    """
 
     response = client.models.generate_content(
         model=model,
         contents=user_prompt,
-        config=config
+        config=types.GenerateContentConfig(
+            temperature=temperature,
+            system_instruction=system_prompt
+        )
     )
     
-    # Parse JSON
-    try:
-        # In strictly typed SDK, response.text might work if mime_type is json, 
-        # or we might need to access parsed fields if using automatic parsing (not yet standard in all SDK versions).
-        # Safe way:
-        llm_output = response.text
-        data = json.loads(llm_output)
-        
-        return {
-            "reflection": data.get("reflection", "").strip(),
-            "revised_report": data.get("revised_report", "").strip()
-        }
-    except Exception as e:
-        print(f"Error parsing JSON: {e}")
-        return {"reflection": "Error", "revised_report": "Error"}
+    return response.text.strip()
 
 
 def convert_report_to_html(report, model: str = "gemini-2.0-flash-exp", temperature: float = 0.5) -> str:
@@ -270,17 +277,20 @@ def main():
         return
 
     # 2) Reflection on the report
-    print("--- Step 2: Reflection and Rewrite ---")
-    reflection_text = reflection_and_rewrite(preliminary_report)
-    print("\n=== Reflection on Report ===")
-    print(reflection_text['reflection'])
+    print("--- Step 2: Reflection (Critique) ---")
+    critique = critique_report(preliminary_report)
+    print("\n=== Critique ===")
+    print(critique)
+    
+    print("\n--- Step 2.5: Rewriting based on Critique ---")
+    revised_report = rewrite_report(preliminary_report, critique)
     print("\n=== Revised Report ===")
-    print(reflection_text['revised_report'])
+    print(revised_report)
     print("==================================\n")
 
     # 3) Convert the report to HTML
     print("--- Step 3: Converting to HTML ---")
-    html = convert_report_to_html(reflection_text['revised_report'])
+    html = convert_report_to_html(revised_report)
     
     print("\n=== Generated HTML (preview) ===")
     print(html[:600], "\n... [truncated]\n")
