@@ -15,3 +15,4 @@ uvicorn
 sqlalchemy
 jinja2
 markdown
+tavily
