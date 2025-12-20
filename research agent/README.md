@@ -1,7 +1,7 @@
 
 # Research Agent with Gemini
 
-This project implements an intelligent research agent using Google's **Gemini 2.0 Flash** model (via the `google-genai` SDK). The agent acts as a comprehensive research pipeline that searches for information, synthesizes a report, critiques its own work, and publishes the final result as a formatted HTML document.
+This project implements an intelligent research agent using Google's **Gemini 2.0 Flash** model (via the `google-genai` SDK). The agent acts as a comprehensive research pipeline that searches for information, synthesizes a report, critiques its own work using a chain-of-thought process, and publishes the final result as a formatted HTML document.
 
 ## Features
 
@@ -10,10 +10,10 @@ This project implements an intelligent research agent using Google's **Gemini 2.
     *   **Tavily Search**: Performs general web searches for up-to-date information.
     *   The agent autonomously decides which tools to use based on the user's prompt.
 
-2.  **Reflection Loop**:
-    *   After generating a preliminary report, the agent adopts a "Reviewer/Editor" persona.
-    *   It critiques the report for strengths, limitations, and opportunities.
-    *   It rewrites the report to incorporate these improvements.
+2.  **Sequential Reflection Loop (Chain of Thought)**:
+    *   **Step 1 (Critique)**: The agent adopts an "Academic Reviewer" persona to strictly analyze the draft. It identifies strengths, limitations, and specific opportunities for improvement.
+    *   **Step 2 (Rewrite)**: The agent switches to an "Editor" persona and rewrites the report, explicitly incorporating the feedback from the critique step.
+    *   This separation ensures higher quality output compared to attempting both tasks simultaneously.
 
 3.  **HTML Publishing**:
     *   The final revised text is converted into a clean, well-structured HTML document ready for sharing.
@@ -50,5 +50,5 @@ python research_agent.py
 
 The script will:
 1.  Start researching the default topic (currently hardcoded as "Radio observations of recurrent novae" in `main()`).
-2.  Print the process of tool usage, draft generation, and reflection to the console.
+2.  Print the process of tool usage, draft generation, critique, and rewriting to the console.
 3.  Save the final output as `research_report.html` in the current directory.
