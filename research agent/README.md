@@ -18,6 +18,17 @@ This project implements an intelligent research agent using Google's **Gemini 2.
 3.  **HTML Publishing**:
     *   The final revised text is converted into a clean, well-structured HTML document ready for sharing.
 
+4.  **Component-Level Evaluation**:
+    *   **Why**: 
+        *   **Efficiency**: Rerunning the entire pipeline (research → reflect → improve) for every small change is expensive and slow.
+        *   **Noise Reduction**: Improvements in research quality might be hidden by randomness in later steps (like reflection or formatting). Evaluating the research component in isolation gives a cleaner signal.
+        *   **Team Optimization**: Allows different parts of a system to be optimized independently with clear metrics.
+    *   **How**:
+        *   Extracts all URLs cited in the draft.
+        *   Checks them against a trusted list (arXiv, Wikipedia, Nature, .edu, etc.).
+        *   Calculates a "Trusted Source Ratio" (passing threshold: 40%).
+        *   **Auto-Correction**: If the report fails, the agent automatically retries the research with specific feedback to improve its sources (up to 3 attempts).
+
 ## Prerequisites
 
 - **Python 3.10+**

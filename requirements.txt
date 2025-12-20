@@ -16,3 +16,4 @@ sqlalchemy
 jinja2
 markdown
 tavily
+wikipedia

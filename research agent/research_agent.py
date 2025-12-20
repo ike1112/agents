@@ -3,6 +3,8 @@ import os
 import sys
 import json
 import time
+import re # Added for evaluation
+
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -20,47 +22,140 @@ client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 # Map tool names to functions
 TOOL_MAPPING = {
     "arxiv_search_tool": research_tools.arxiv_search_tool,
-    "tavily_search_tool": research_tools.tavily_search_tool
+    "tavily_search_tool": research_tools.tavily_search_tool,
+    "wikipedia_search_tool": research_tools.wikipedia_search_tool
 }
 
-def generate_research_report_with_tools(prompt: str, model: str = "gemini-2.0-flash-exp") -> str:
+# list of preferred domains for Tavily results
+TOP_DOMAINS = {
+    # General reference / institutions / publishers
+    "wikipedia.org", "nature.com", "science.org", "sciencemag.org", "cell.com",
+    "mit.edu", "stanford.edu", "harvard.edu", "nasa.gov", "noaa.gov", "europa.eu",
+
+    # CS/AI venues & indexes
+    "arxiv.org", "acm.org", "ieee.org", "neurips.cc", "icml.cc", "openreview.net",
+
+    # Other reputable outlets
+    "elifesciences.org", "pnas.org", "jmlr.org", "springer.com", "sciencedirect.com",
+
+    # Extra domains (case-specific additions)
+    "pbs.org", "nova.edu", "nvcc.edu", "cccco.edu",
+    "cfa.harvard.edu", "nrao.edu", # Astronomy specific
+
+    # Well known programming sites
+    "codecademy.com", "datacamp.com"
+}
+
+# Why component-level evaluations?
+# If the problem lies in the research generation (usually the first step), 
+# rerunning the entire pipeline (research → reflect → improve) every time can be expensive and noisy.
+
+# Small improvements in research quality may be hidden by randomness introduced by later components.
+# By evaluating the research generation alone, you get a clearer signal of whether that component is improving.
+
+# Component-level evals are also efficient when multiple teams are working on different pieces of a system: each team can optimize its own component using a clear metric, without needing to run or wait for full end-to-end tests.
+
+def evaluate_tavily_results(TOP_DOMAINS, raw: str, min_ratio=0.4):
+    """
+    Evaluate whether plain-text research results mostly come from preferred domains.
+    
+    How do we evaluate?
+    Our evaluation here is objective, and so can be evaluated using code. It has a specific 
+    ground truth - the list of preferred sources for trustworthy research. To build the eval, you will:
+    1. Extract the URLs cited in the generated report.
+    2. Compare them against a predefined list of preferred domains (e.g., arxiv.org, nature.com, nasa.gov).
+    3. Compute the ratio of preferred vs. total results.
+    4. Return a PASS/FAIL flag along with a Markdown-formatted summary.
+
+    Args:
+        TOP_DOMAINS (set[str]): Set of preferred domains (e.g., 'arxiv.org', 'nature.com').
+        raw (str): Plain text or Markdown containing URLs.
+        min_ratio (float): Minimum preferred ratio required to pass (e.g., 0.4 = 40%).
+
+    Returns:
+        tuple[bool, str]: (flag, markdown_report)
+            flag -> True if PASS, False if FAIL
+            markdown_report -> Markdown-formatted summary of the evaluation
+    """
+
+    # Extract URLs from the text
+    url_pattern = re.compile(r'https?://[^\s\]\)>\}]+', flags=re.IGNORECASE)
+    urls = url_pattern.findall(raw)
+
+    if not urls:
+        return False, """### Evaluation — Tavily Preferred Domains
+No URLs detected in the provided text. 
+Please include links in your research results.
+"""
+
+    # Count preferred vs total
+    total = len(urls)
+    preferred_count = 0
+    details = []
+
+    for url in urls:
+        try:
+            domain = url.split("/")[2] # Extract domain part after http:// or https://
+            # Remove 'www.' for cleaner matching if present (not strictly necessary with substring match but good practice)
+            if domain.startswith("www."):
+                domain = domain[4:]
+                
+            preferred = any(td in domain for td in TOP_DOMAINS)
+            if preferred:
+                preferred_count += 1
+            details.append(f"- {url} → {'✅ PREFERRED' if preferred else '❌ NOT PREFERRED'}")
+        except IndexError:
+            # Handle malformed URLs
+            details.append(f"- {url} → ⚠️ MALFORMED")
+
+    ratio = preferred_count / total if total > 0 else 0.0
+    flag = ratio >= min_ratio
+
+    # Markdown report
+    report = f"""
+### Evaluation — Tavily Preferred Domains
+- Total results: {total}
+- Preferred results: {preferred_count}
+- Ratio: {ratio:.2%}
+- Threshold: {min_ratio:.0%}
+- Status: {"✅ PASS" if flag else "❌ FAIL"}
+
+**Details:**
+{chr(10).join(details)}
+"""
+    return flag, report
+
+def generate_research_report_with_tools(prompt: str, model: str = "gemini-2.0-flash-exp", chat_history: list = None) -> tuple[str, list]:
     """
     Generates a research report using Gemini's tool-calling with arXiv and Tavily tools.
 
     Args:
         prompt (str): The user prompt.
         model (str): Gemini model name.
+        chat_history (list): Optional previous history for conversation continuity.
 
     Returns:
-        str: Final assistant research report text.
+        tuple[str, list]: (Final assistant research report text, Updated chat history)
     """
     
-    # helper to convert python function to tool declaration if needed, 
-    # but google-genai SDK handles functions directly in 'tools' config.
-    tools = [research_tools.arxiv_search_tool, research_tools.tavily_search_tool]
+    tools = [research_tools.arxiv_search_tool, research_tools.tavily_search_tool, research_tools.wikipedia_search_tool]
+
     
-    # We will use a chat session to maintain history easily, 
-    # or we can manually manage messages as the assignment originally did.
-    # To be closer to the "manual loop" exercise of the assignment, let's manage history manually
-    # but use the SDK's chat interface which is cleaner for Gemini.
-    
-    # However, to strictly follow the "manual tool execution" pattern:
-    # chat = client.chats.create(model=model)
-    
-    # System instruction (Gemini 2.0 supports system_instruction at client/chat level, 
-    # but here we can just pass it as the first part of the prompt or configure it)
+    # System instruction (passed via config)
+
     system_instruction = (
-        "You are a research assistant that can search the web and arXiv to write detailed, "
+        "You are a research assistant that can search the web, Wikipedia, and arXiv to write detailed, "
         "accurate, and properly sourced research reports.\n\n"
         "Use tools when appropriate (e.g., to find scientific papers or web content).\n"
         "Cite sources whenever relevant. Do NOT omit citations for brevity.\n"
-        "When possible, include full URLs (arXiv links, web sources, etc.).\n"
+        "When citing a source, YOU MUST PROVIDE THE EXPLICIT URL. Do not just hyperlink text.\n"
+        "For example, write: 'source: https://example.com' or '[Title](https://example.com)'.\n"
         "Use an academic tone, organize output into clearly labeled sections, and include "
         "inline citations or footnotes as needed.\n"
-        "Do not include placeholder text such as '(citation needed)' or '(citations omitted)'."
+        "Do not include placeholder text such as '(citation needed)' or '(citations omitted)'.\n"
+        "ALWAYS include a section called 'References' at the end of the report listing the full URLs of all sources used."
     )
     
-    # In 'google-genai', we can set system_instruction in config
     config = types.GenerateContentConfig(
         tools=tools,
         temperature=1.0, 
@@ -68,8 +163,12 @@ def generate_research_report_with_tools(prompt: str, model: str = "gemini-2.0-fl
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True) # We want to handle it manually as per assignment
     )
 
-    # Initial message
-    history = [types.Content(role="user", parts=[types.Part(text=prompt)])]
+    # Initialize or update history
+    if chat_history:
+        history = chat_history
+        history.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
+    else:
+        history = [types.Content(role="user", parts=[types.Part(text=prompt)])]
     
     max_turns = 10
     final_text = ""
@@ -78,9 +177,6 @@ def generate_research_report_with_tools(prompt: str, model: str = "gemini-2.0-fl
 
     for _ in range(max_turns):
         # Send message (or history) to model
-        # For manual loop with history, we use chat.send_message but need to be careful with history sync.
-        # Easier to just use client.models.generate_content with full history.
-        
         response = client.models.generate_content(
             model=model,
             contents=history,
@@ -88,8 +184,7 @@ def generate_research_report_with_tools(prompt: str, model: str = "gemini-2.0-fl
         )
 
         # Append assistant response to history
-        # Note: Gemini response might have function calls.
-        
+         
         # In Gemini SDK, response.candidates[0].content is the message content
         if not response.candidates:
             print("No candidates returned.")
@@ -109,8 +204,7 @@ def generate_research_report_with_tools(prompt: str, model: str = "gemini-2.0-fl
             # Find text part
             text_parts = [p.text for p in assistant_content.parts if p.text]
             final_text = "".join(text_parts)
-            print("Final answer:")
-            print(final_text)
+            print("Final answer obtained.")
             break
         
         # Execute tool calls
@@ -120,7 +214,6 @@ def generate_research_report_with_tools(prompt: str, model: str = "gemini-2.0-fl
             args = call.args
             
             # Convert args to dict (Gemini args are usually dict-like or standard python dict)
-            # The SDK handles this well.
             print(f"Tool Call: {tool_name}({args})")
             
             try:
@@ -146,7 +239,10 @@ def generate_research_report_with_tools(prompt: str, model: str = "gemini-2.0-fl
         # Append function responses to history
         history.append(types.Content(role="tool", parts=function_responses_parts))
         
-    return final_text if final_text else "No final report generated."
+    if not final_text:
+        final_text = "No final report generated."
+        
+    return final_text, history
 
 
 def critique_report(report, model: str = "gemini-2.0-flash-exp", temperature: float = 0.3) -> str:
@@ -264,17 +360,45 @@ def main():
 
     print("=== C1M3 Assignment: Research Agent with Gemini ===\n")
     
-    # 1) Research with tools
+    # 1) Research with tools (with retry loop)
     prompt_ = "Radio observations of recurrent novae"
-    print(f"--- Step 1: Generating Report for '{prompt_}' ---")
-    preliminary_report = generate_research_report_with_tools(prompt_)
-    print("\n=== Research Report (preliminary) ===")
-    print(preliminary_report)
-    print("=====================================\n")
+    
+    current_prompt = prompt_
+    chat_history = None
+    max_retries = 3
+    preliminary_report = ""
+    
+    for attempt in range(max_retries):
+        print(f"--- Step 1: Generating Report for '{prompt_}' (Attempt {attempt + 1}/{max_retries}) ---")
+        
+        preliminary_report, chat_history = generate_research_report_with_tools(current_prompt, chat_history=chat_history)
+        
+        print("\n=== Research Report (preliminary) ===")
+        print(preliminary_report)
+        print("=====================================\n")
 
-    if not preliminary_report or preliminary_report == "No final report generated.":
-        print("Skipping remaining steps due to empty report.")
-        return
+        if not preliminary_report or preliminary_report == "No final report generated.":
+            print("Skipping remaining steps due to empty report.")
+            return
+
+        # 1.5) Component-Level Evaluation (New Step)
+        print("--- Step 1.5: Component-Level Evaluation (Tavily Results) ---")
+        pass_flag, eval_report = evaluate_tavily_results(TOP_DOMAINS, preliminary_report)
+        print(eval_report)
+        
+        if pass_flag:
+            print("✅ Quality check passed!")
+            break
+        else:
+            print("⚠️ Warning: Research results did not meet the preferred domain threshold.")
+            if attempt < max_retries - 1:
+                print("♻️ Retrying with feedback...")
+                current_prompt = f"The previous report failed quality checks because of low trusted domain usage.\nEvaluator Report:\n{eval_report}\n\nPlease REWRITE the report. Improve your research by citing specifically from preferred domains like Wikipedia, ArXiv, or .edu sites. ENSURE you include the FULL URL for every citation so it can be verified."
+            else:
+                print("❌ Max retries reached. Stopping execution.")
+                return
+
+    print("============================================================\n")
 
     # 2) Reflection on the report
     print("--- Step 2: Reflection (Critique) ---")

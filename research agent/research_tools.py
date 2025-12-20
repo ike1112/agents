@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 # ================================
 import requests
 from tavily import TavilyClient
+import wikipedia
 from dotenv import load_dotenv
 
 # ================================
@@ -129,6 +130,32 @@ def tavily_search_tool(
 
     except Exception as e:
         return [{"error": str(e)}]  # For LLM-friendly agents
+
+
+def wikipedia_search_tool(query: str, sentences: int = 5) -> list[dict]:
+    """
+    Searches Wikipedia for a summary of the given query.
+
+    Args:
+        query (str): Search query for Wikipedia.
+        sentences (int): Number of sentences to include in the summary.
+
+    Returns:
+        list[dict]: A list with a single dictionary containing title, summary, and URL.
+    """
+    try:
+        page_title = wikipedia.search(query)[0]
+        page = wikipedia.page(page_title)
+        summary = wikipedia.summary(page_title, sentences=sentences)
+
+        return [{
+            "title": page.title,
+            "summary": summary,
+            "url": page.url
+        }]
+    except Exception as e:
+        return [{"error": str(e)}]
+
 
 
 
