@@ -17,3 +17,4 @@ jinja2
 markdown
 tavily
 wikipedia
+tinydb
