@@ -62,8 +62,17 @@ Once your analysis is complete, summarize:
         )
     ]
 
+    # Turn Limit for safety (Circuit Breaker)
+    turn_count = 0
+    max_turns = 5
+
     # Multi-turn loop for tool use
     while True:
+        turn_count += 1
+        if turn_count > max_turns:
+             print("⚠️ Limit reached. Stopping infinite loop.")
+             return {"status": "timeout", "content": "I gathered some info but hit the limit before finalizing the report."}
+
         try:
             # Reconstruct contents properly with types.Part
             # Note: prompt_ is defined above
@@ -78,7 +87,7 @@ Once your analysis is complete, summarize:
             )
         except Exception as e:
             print(f"Error calling Gemini: {e}")
-            return "Error during market research."
+            return {"status": "error", "content": "Error during market research."}
         
         # Check if the model wants to call a function
         function_calls = []
@@ -120,11 +129,11 @@ Once your analysis is complete, summarize:
         if response.text:
             final_text = response.text
             utils.log_final_summary_html(final_text)
-            return final_text
+            return {"status": "success", "content": final_text}
         
         break
 
-    return "No result found."
+    return {"status": "error", "content": "No result found."}
 
 
 # =========================
@@ -345,8 +354,14 @@ def run_sunglasses_campaign_pipeline() -> dict:
     print("Starting Pipeline...")
     
     # --- Step 1: Market Research ---
-    # State Capture: We capture the text result from the Research Agent.
-    trend_summary = market_research_agent() 
+    # State Capture: We capture the structured result from the Research Agent.
+    research_result = market_research_agent()
+    
+    if research_result["status"] != "success":
+        print(f"🛑 Market Research Failed or Timed Out: {research_result['content']}")
+        return {}
+
+    trend_summary = research_result["content"]
     print("✅ Market research completed")
     time.sleep(5) # Respect rate limits
 
