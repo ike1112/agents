@@ -55,6 +55,7 @@ PLANNING RULES (critical):
 - Derive ALL filters/parameters from user_request (shape/keywords, price ranges "under/over/between", stock mentions,
   quantities, buy/return intent). Do NOT hard-code values.
 - Build TinyDB queries dynamically with Query(). If a constraint isn't in user_request, don't apply it.
+- **REGEX WARNING**: TinyDB `.search()` takes a regex string. It does NOT accept `case=False`. Use `flags=re.IGNORECASE` if available, or rely on normal regex syntax `(?i)...` inside the string.
 - Be conservative: if intent is ambiguous, do read-only (DRY RUN).
 
 TRANSACTION POLICY (hard):
